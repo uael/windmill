@@ -1505,11 +1505,16 @@ pub async fn handle_flow<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(
     rsmq: Option<R>,
     job_completed_tx: Sender<SendResult>,
 ) -> anyhow::Result<()> {
-    let flow = flow_value
+    let mut flow = flow_value
         .with_context(|| "Unable to parse flow definition")?;
     let status = flow_job
         .parse_flow_status()
         .with_context(|| "Unable to parse flow status")?;
+
+    add_virtual_items_if_necessary(&mut flow.modules);
+    if flow_job.same_worker {
+        flow.same_worker = true;
+    }
 
     if !flow_job.is_flow_step
         && status.retry.fail_count == 0
