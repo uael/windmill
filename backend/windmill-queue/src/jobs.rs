@@ -48,7 +48,7 @@ use windmill_common::{
         Iterator, JobResult, RestartedFrom, RetryStatus, MAX_RETRY_ATTEMPTS, MAX_RETRY_INTERVAL,
     },
     flows::{
-        add_virtual_items_if_necessary, FlowModule, FlowModuleValue, FlowValue, InputTransform,
+        FlowModule, FlowModuleValue, FlowValue, InputTransform,
     },
     jobs::{
         get_payload_tag_from_prefixed_path, CompletedJob, JobKind, JobPayload, QueuedJob, RawCode,
@@ -3442,8 +3442,6 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
             None,
         ),
         JobPayload::RawFlow { mut value, path, restarted_from } => {
-            add_virtual_items_if_necessary(&mut value.modules);
-
             let flow_status: FlowStatus = match restarted_from {
                 Some(restarted_from_val) => {
                     let (_, _, step_n, truncated_modules, _, user_states, cleanup_module) =
@@ -3489,7 +3487,7 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
                 None,
                 path,
                 None,
-                JobKind::FlowPreview,
+                JobKind::FlowPreview, // `FlowPreview`: mean the `raw_flow` is required.
                 Some(value.clone()),
                 Some(flow_status),
                 None,
@@ -3558,7 +3556,7 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
                 None,
                 Some(path),
                 None,
-                JobKind::Flow,
+                JobKind::FlowPreview, // `FlowPreview`: mean the `raw_flow` is required.
                 Some(flow_value.clone()),
                 Some(FlowStatus::new(&flow_value)), // this is a new flow being pushed, flow_status is set to flow_value
                 None,
@@ -3583,17 +3581,13 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
                 tx
             )?
             .ok_or_else(|| Error::InternalErr(format!("not found flow at path {:?}", path)))?;
-            let mut value =
+            let value =
                 serde_json::from_str::<FlowValue>(value_json.value.get()).map_err(|err| {
                     Error::InternalErr(format!(
                         "could not convert json to flow for {path}: {err:?}"
                     ))
                 })?;
             let priority = value.priority;
-            add_virtual_items_if_necessary(&mut value.modules);
-            if same_worker {
-                value.same_worker = true;
-            }
             let cache_ttl = value.cache_ttl.map(|x| x as i32).clone();
             let custom_concurrency_key = value.concurrency_key.clone();
             let concurrency_time_window_s = value.concurrency_time_window_s.clone();
@@ -3601,7 +3595,6 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
 
             let extra = args.extra.get_or_insert_with(HashMap::new);
             if !apply_preprocessor {
-                value.preprocessor_module = None;
                 extra.remove("wm_trigger");
             } else {
                 extra.entry("wm_trigger".to_string()).or_insert_with(|| {
@@ -3610,13 +3603,20 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
                     }))
                 });
             }
+            let (kind, value) = if !apply_preprocessor && value.preprocessor_module.is_some() {
+                // `FlowPreview`: mean the `raw_flow` is required.
+                (JobKind::FlowPreview, FlowValue { preprocessor_module: None, ..value })
+            } else {
+                // `Flow`: the `raw_flow` is retrieved from the database when handled.
+                (JobKind::Flow, value)
+            };
             let status = Some(FlowStatus::new(&value));
             (
                 None,
                 Some(path),
                 None,
-                JobKind::Flow,
-                Some(value),
+                kind,
+                if matches!(kind, JobKind::Flow) { None } else { Some(value) },
                 status, // this is a new flow being pushed, flow_status is set to flow_value
                 None,
                 custom_concurrency_key,
@@ -3673,7 +3673,7 @@ pub async fn push<'c, 'd, R: rsmq_async::RsmqConnection + Send + 'c>(
                 flow_path,
                 None,
                 JobKind::Flow,
-                Some(raw_flow.clone()),
+                None, // `Flow`: the `raw_flow` is retrieved from the database when handled.
                 Some(restarted_flow_status),
                 None,
                 raw_flow.concurrency_key,
