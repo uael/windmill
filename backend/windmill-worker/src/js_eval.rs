@@ -55,7 +55,7 @@ use windmill_common::error::Error;
 use windmill_common::{flow_status::JobResult, DB};
 use windmill_queue::CanceledBy;
 
-use crate::{common::OccupancyMetrics, AuthedClient};
+use crate::AuthedClient;
 
 #[cfg(feature = "deno_core")]
 use crate::{common::unsafe_raw, handle_child::run_future_with_polling_update_job_poller};
@@ -753,7 +753,6 @@ pub async fn eval_fetch_timeout(
     _worker_name: &str,
     _w_id: &str,
     _load_client: bool,
-    _occupation_metrics: &mut OccupancyMetrics,
 ) -> anyhow::Result<Box<RawValue>> {
     use serde_json::value::to_raw_value;
     Ok(to_raw_value("require deno_core").unwrap())
@@ -773,7 +772,6 @@ pub async fn eval_fetch_timeout(
     worker_name: &str,
     w_id: &str,
     load_client: bool,
-    occupation_metrics: &mut OccupancyMetrics,
 ) -> anyhow::Result<Box<RawValue>> {
     use windmill_queue::append_logs;
 
@@ -929,7 +927,6 @@ pub async fn eval_fetch_timeout(
         async { result_f.await? },
         worker_name,
         w_id,
-        &mut Some(occupation_metrics),
     )
     .await
     .map_err(|e| {

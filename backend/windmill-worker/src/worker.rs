@@ -1342,221 +1342,235 @@ pub async fn run_worker<R: rsmq_async::RsmqConnection + Send + Sync + Clone + 's
                         }
                     }
                 }
-                if matches!(job.job_kind, JobKind::Noop) {
-                    add_time!(bench, "send job completed START");
-                    job_completed_tx
-                        .send(JobCompleted {
-                            job: Arc::new(job),
-                            success: true,
-                            result: Arc::new(empty_result()),
-                            mem_peak: 0,
-                            cached_res_path: None,
-                            token: "".to_string(),
-                            canceled_by: None,
-                        })
-                        .await
-                        .expect("send job completed END");
-                    add_time!(bench, "sent job completed");
-                } else {
-                    let token = create_token_for_owner_in_bg(&db, &job).await;
-                    add_outstanding_wait_time(&job, db, OUTSTANDING_WAIT_TIME_THRESHOLD_MS);
 
-                    #[cfg(feature = "prometheus")]
-                    register_metric(
-                        &WORKER_EXECUTION_COUNT,
-                        &job.tag,
-                        |s| {
-                            let counter = prometheus::register_int_counter!(prometheus::Opts::new(
-                                "worker_execution_count",
-                                "Number of executed jobs"
-                            )
-                            .const_label("name", &worker_name)
-                            .const_label("tag", s))
-                            .expect("register prometheus metric");
-                            counter.inc();
-                            (counter, ())
-                        },
-                        |c| c.inc(),
-                    )
-                    .await;
+                let worker_dir = worker_dir.clone();
+                let killpill_tx = killpill_tx.clone();
+                let job_completed_tx = job_completed_tx.clone();
+                let same_worker_tx = same_worker_tx.clone();
+                let worker_name = worker_name.clone();
+                let rsmq = rsmq.clone();
+                let db = db.clone();
+                let hostname = hostname.to_string();
+                let base_internal_url = base_internal_url.to_string();
 
-                    #[cfg(feature = "prometheus")]
-                    let _timer = register_metric(
-                        &WORKER_EXECUTION_DURATION,
-                        &job.tag,
-                        |s| {
-                            let counter =
-                                prometheus::register_histogram!(prometheus::HistogramOpts::new(
-                                    "worker_execution_duration",
-                                    "Duration between receiving a job and completing it",
-                                )
-                                .const_label("name", &worker_name)
-                                .const_label("tag", s))
-                                .expect("register prometheus metric");
-                            let t = counter.start_timer();
-                            (counter, t)
-                        },
-                        |c| c.start_timer(),
-                    )
-                    .await;
-
-                    let job_root = job
-                        .root_job
-                        .map(|x| x.to_string())
-                        .unwrap_or_else(|| "none".to_string());
-
-                    if job.id == Uuid::nil() {
-                        tracing::info!("running warmup job");
+                tokio::spawn(async move {
+                    if matches!(job.job_kind, JobKind::Noop) {
+                        add_time!(bench, "send job completed START");
+                        job_completed_tx
+                            .send(JobCompleted {
+                                job: Arc::new(job),
+                                success: true,
+                                result: Arc::new(empty_result()),
+                                mem_peak: 0,
+                                cached_res_path: None,
+                                token: "".to_string(),
+                                canceled_by: None,
+                            })
+                            .await
+                            .expect("send job completed END");
+                        add_time!(bench, "sent job completed");
                     } else {
-                        tracing::info!(workspace_id = %job.workspace_id, job_id = %job.id, root_id = %job_root, "fetched job {}, root job: {}", job.id, job_root);
-                    } // Here we can't remove the job id, but maybe with the
-                      // fields macro we can make a job id that only appears when
-                      // the job is defined?
+                        let token = create_token_for_owner_in_bg(&db, &job).await;
+                        add_outstanding_wait_time(&job, &db, OUTSTANDING_WAIT_TIME_THRESHOLD_MS);
 
-                    let job_dir = format!("{worker_dir}/{}", job.id);
-
-                    DirBuilder::new()
-                        .recursive(true)
-                        .create(&job_dir)
-                        .expect("could not create job dir");
-
-                    let same_worker = job.same_worker;
-
-                    let folder = if job.language == Some(ScriptLang::Go) {
-                        DirBuilder::new()
-                            .recursive(true)
-                            .create(&format!("{job_dir}/go"))
-                            .expect("could not create go dir");
-                        "/go"
-                    } else {
-                        ""
-                    };
-
-                    let target = &format!("{job_dir}{folder}/shared");
-
-                    if same_worker && job.parent_job.is_some() {
-                        if tokio::fs::metadata(target).await.is_err() {
-                            let parent_flow = job.parent_job.unwrap();
-                            let parent_shared_dir = format!("{worker_dir}/{parent_flow}/shared");
-                            DirBuilder::new()
-                                .recursive(true)
-                                .create(&parent_shared_dir)
-                                .expect("could not create parent shared dir");
-
-                            symlink(&parent_shared_dir, target)
-                                .await
-                                .expect("could not symlink target");
-                        }
-                    } else {
-                        DirBuilder::new()
-                            .recursive(true)
-                            .create(target)
-                            .expect("could not create shared dir");
-                    }
-
-                    let authed_client = AuthedClientBackgroundTask {
-                        base_internal_url: base_internal_url.to_string(),
-                        token,
-                        workspace: job.workspace_id.to_string(),
-                    };
-
-                    #[cfg(feature = "prometheus")]
-                    let tag = job.tag.clone();
-
-                    let is_init_script: bool = job.tag.as_str() == INIT_SCRIPT_TAG;
-                    let arc_job = Arc::new(job);
-                    add_time!(bench, "handle_queued_job START");
-                    match handle_queued_job(
-                        arc_job.clone(),
-                        db,
-                        &authed_client,
-                        &hostname,
-                        &worker_name,
-                        &worker_dir,
-                        &job_dir,
-                        same_worker_tx.clone(),
-                        base_internal_url,
-                        rsmq.clone(),
-                        job_completed_tx.clone(),
-                        &mut occupancy_metrics,
-                        #[cfg(feature = "benchmark")]
-                        &mut bench,
-                    )
-                    .await
-                    {
-                        Err(err) => {
-                            handle_job_error(
-                                db,
-                                &authed_client.get_authed().await,
-                                arc_job.as_ref(),
-                                0,
-                                None,
-                                err,
-                                false,
-                                same_worker_tx.clone(),
-                                &worker_dir,
-                                rsmq.clone(),
-                                &worker_name,
-                                (&job_completed_tx.0).clone(),
-                                #[cfg(feature = "benchmark")]
-                                &mut bench,
-                            )
-                            .await;
-                            if is_init_script {
-                                tracing::error!("init script job failed (in handler), exiting");
-                                update_worker_ping_for_failed_init_script(
-                                    db,
-                                    &worker_name,
-                                    arc_job.id,
-                                )
-                                .await;
-                                break;
-                            }
-                        }
-                        Ok(false) if is_init_script => {
-                            tracing::error!("init script job failed, exiting");
-                            update_worker_ping_for_failed_init_script(db, &worker_name, arc_job.id)
-                                .await;
-                            break;
-                        }
-                        _ => {}
-                    }
-
-                    #[cfg(feature = "prometheus")]
-                    if let Some(duration) = _timer.map(|x| x.stop_and_record()) {
+                        #[cfg(feature = "prometheus")]
                         register_metric(
-                            &WORKER_EXECUTION_DURATION_COUNTER,
-                            &tag,
+                            &WORKER_EXECUTION_COUNT,
+                            &job.tag,
                             |s| {
-                                let counter = prometheus::register_counter!(prometheus::Opts::new(
-                                    "worker_execution_duration_counter",
-                                    "Total number of seconds spent executing jobs"
+                                let counter = prometheus::register_int_counter!(prometheus::Opts::new(
+                                    "worker_execution_count",
+                                    "Number of executed jobs"
                                 )
                                 .const_label("name", &worker_name)
                                 .const_label("tag", s))
                                 .expect("register prometheus metric");
-                                counter.inc_by(duration);
+                                counter.inc();
                                 (counter, ())
                             },
-                            |c| c.inc_by(duration),
+                            |c| c.inc(),
                         )
                         .await;
+
+                        #[cfg(feature = "prometheus")]
+                        let _timer = register_metric(
+                            &WORKER_EXECUTION_DURATION,
+                            &job.tag,
+                            |s| {
+                                let counter =
+                                    prometheus::register_histogram!(prometheus::HistogramOpts::new(
+                                        "worker_execution_duration",
+                                        "Duration between receiving a job and completing it",
+                                    )
+                                    .const_label("name", &worker_name)
+                                    .const_label("tag", s))
+                                    .expect("register prometheus metric");
+                                let t = counter.start_timer();
+                                (counter, t)
+                            },
+                            |c| c.start_timer(),
+                        )
+                        .await;
+
+                        let job_root = job
+                            .root_job
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| "none".to_string());
+
+                        if job.id == Uuid::nil() {
+                            tracing::info!("running warmup job");
+                        } else {
+                            tracing::info!(workspace_id = %job.workspace_id, job_id = %job.id, root_id = %job_root, "fetched job {}, root job: {}", job.id, job_root);
+                        } // Here we can't remove the job id, but maybe with the
+                        // fields macro we can make a job id that only appears when
+                        // the job is defined?
+
+                        let job_dir = format!("{worker_dir}/{}", job.id);
+
+                        DirBuilder::new()
+                            .recursive(true)
+                            .create(&job_dir)
+                            .expect("could not create job dir");
+
+                        let same_worker = job.same_worker;
+
+                        let folder = if job.language == Some(ScriptLang::Go) {
+                            DirBuilder::new()
+                                .recursive(true)
+                                .create(&format!("{job_dir}/go"))
+                                .expect("could not create go dir");
+                            "/go"
+                        } else {
+                            ""
+                        };
+
+                        let target = &format!("{job_dir}{folder}/shared");
+
+                        if same_worker && job.parent_job.is_some() {
+                            if tokio::fs::metadata(target).await.is_err() {
+                                let parent_flow = job.parent_job.unwrap();
+                                let parent_shared_dir = format!("{worker_dir}/{parent_flow}/shared");
+                                DirBuilder::new()
+                                    .recursive(true)
+                                    .create(&parent_shared_dir)
+                                    .expect("could not create parent shared dir");
+
+                                symlink(&parent_shared_dir, target)
+                                    .await
+                                    .expect("could not symlink target");
+                            }
+                        } else {
+                            DirBuilder::new()
+                                .recursive(true)
+                                .create(target)
+                                .expect("could not create shared dir");
+                        }
+
+                        let authed_client = AuthedClientBackgroundTask {
+                            base_internal_url: base_internal_url.to_string(),
+                            token,
+                            workspace: job.workspace_id.to_string(),
+                        };
+
+                        #[cfg(feature = "prometheus")]
+                        let tag = job.tag.clone();
+
+                        let is_init_script: bool = job.tag.as_str() == INIT_SCRIPT_TAG;
+                        let arc_job = Arc::new(job);
+                        add_time!(bench, "handle_queued_job START");
+                        match handle_queued_job(
+                            arc_job.clone(),
+                            &db,
+                            &authed_client,
+                            &hostname,
+                            &worker_name,
+                            &worker_dir,
+                            &job_dir,
+                            same_worker_tx.clone(),
+                            &base_internal_url,
+                            rsmq.clone(),
+                            job_completed_tx.clone(),
+                            #[cfg(feature = "benchmark")]
+                            &mut bench,
+                        )
+                        .await
+                        {
+                            Err(err) => {
+                                handle_job_error(
+                                    &db,
+                                    &authed_client.get_authed().await,
+                                    arc_job.as_ref(),
+                                    0,
+                                    None,
+                                    err,
+                                    false,
+                                    same_worker_tx.clone(),
+                                    &worker_dir,
+                                    rsmq.clone(),
+                                    &worker_name,
+                                    (&job_completed_tx.0).clone(),
+                                    #[cfg(feature = "benchmark")]
+                                    &mut bench,
+                                )
+                                .await;
+                                if is_init_script {
+                                    tracing::error!("init script job failed (in handler), exiting");
+                                    update_worker_ping_for_failed_init_script(
+                                        &db,
+                                        &worker_name,
+                                        arc_job.id,
+                                    )
+                                    .await;
+                                    killpill_tx.send(()).unwrap_or_default();
+                                    return;
+                                }
+                            }
+                            Ok(false) if is_init_script => {
+                                tracing::error!("init script job failed, exiting");
+                                update_worker_ping_for_failed_init_script(&db, &worker_name, arc_job.id)
+                                    .await;
+                                killpill_tx.send(()).unwrap_or_default();
+                                return;
+                            }
+                            _ => {}
+                        }
+
+                        #[cfg(feature = "prometheus")]
+                        if let Some(duration) = _timer.map(|x| x.stop_and_record()) {
+                            register_metric(
+                                &WORKER_EXECUTION_DURATION_COUNTER,
+                                &tag,
+                                |s| {
+                                    let counter = prometheus::register_counter!(prometheus::Opts::new(
+                                        "worker_execution_duration_counter",
+                                        "Total number of seconds spent executing jobs"
+                                    )
+                                    .const_label("name", &worker_name)
+                                    .const_label("tag", s))
+                                    .expect("register prometheus metric");
+                                    counter.inc_by(duration);
+                                    (counter, ())
+                                },
+                                |c| c.inc_by(duration),
+                            )
+                            .await;
+                        }
+
+                        if !KEEP_JOB_DIR.load(Ordering::Relaxed) && !(arc_job.is_flow() && same_worker)
+                        {
+                            let _ = tokio::fs::remove_dir_all(job_dir).await;
+                        }
                     }
 
-                    if !KEEP_JOB_DIR.load(Ordering::Relaxed) && !(arc_job.is_flow() && same_worker)
+                    #[cfg(feature = "benchmark")]
                     {
-                        let _ = tokio::fs::remove_dir_all(job_dir).await;
+                        if started {
+                            add_time!(bench, "job processed");
+                            infos.add_iter(bench, true);
+                        }
                     }
-                }
-
-                #[cfg(feature = "benchmark")]
-                {
-                    if started {
-                        add_time!(bench, "job processed");
-                        infos.add_iter(bench, true);
-                    }
-                }
-            }
+                });
+            },
             Ok(None) => {
                 if let Some(secs) = *EXIT_AFTER_NO_JOB_FOR_SECS {
                     if let Some(lj) = last_executed_job {
@@ -1718,7 +1732,6 @@ async fn do_nativets(
     mem_peak: &mut i32,
     canceled_by: &mut Option<CanceledBy>,
     worker_name: &str,
-    occupancy_metrics: &mut OccupancyMetrics,
 ) -> windmill_common::error::Result<Box<RawValue>> {
     let args = build_args_map(job, client, db).await?.map(Json);
     let job_args = if args.is_some() {
@@ -1740,7 +1753,6 @@ async fn do_nativets(
         worker_name,
         &job.workspace_id,
         true,
-        occupancy_metrics,
     )
     .await?)
 }
@@ -1764,7 +1776,6 @@ async fn handle_queued_job<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(
     base_internal_url: &str,
     rsmq: Option<R>,
     job_completed_tx: JobCompletedSender,
-    occupancy_metrics: &mut OccupancyMetrics,
     #[cfg(feature = "benchmark")] bench: &mut BenchmarkIter,
 ) -> windmill_common::error::Result<bool> {
     if job.canceled {
@@ -1997,7 +2008,6 @@ async fn handle_queued_job<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(
                     base_internal_url,
                     &client.get_token().await,
                     rsmq.clone(),
-                    occupancy_metrics,
                 )
                 .await
             }
@@ -2014,7 +2024,6 @@ async fn handle_queued_job<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(
                     base_internal_url,
                     &client.get_token().await,
                     rsmq.clone(),
-                    occupancy_metrics,
                 )
                 .await
             }
@@ -2029,7 +2038,6 @@ async fn handle_queued_job<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(
                 base_internal_url,
                 &client.get_token().await,
                 rsmq.clone(),
-                occupancy_metrics,
             )
             .await
             .map(|()| serde_json::from_str("{}").unwrap()),
@@ -2056,11 +2064,11 @@ async fn handle_queued_job<R: rsmq_async::RsmqConnection + Send + Sync + Clone>(
                     worker_name,
                     &mut column_order,
                     &mut new_args,
-                    occupancy_metrics,
                 )
                 .await;
-                occupancy_metrics.total_duration_of_running_jobs +=
-                    metric_timer.elapsed().as_secs_f32();
+                // TODO:
+                // occupancy_metrics.total_duration_of_running_jobs +=
+                //     metric_timer.elapsed().as_secs_f32();
                 r
             }
         };
@@ -2220,7 +2228,6 @@ async fn handle_code_execution_job(
     worker_name: &str,
     column_order: &mut Option<Vec<String>>,
     new_args: &mut Option<HashMap<String, Box<RawValue>>>,
-    occupancy_metrics: &mut OccupancyMetrics,
 ) -> error::Result<Box<RawValue>> {
     let ContentReqLangEnvs {
         content: inner_content,
@@ -2274,7 +2281,6 @@ async fn handle_code_execution_job(
             canceled_by,
             worker_name,
             column_order,
-            occupancy_metrics,
         )
         .await;
     } else if language == Some(ScriptLang::Mysql) {
@@ -2287,7 +2293,6 @@ async fn handle_code_execution_job(
             canceled_by,
             worker_name,
             column_order,
-            occupancy_metrics,
         )
         .await;
     } else if language == Some(ScriptLang::Bigquery) {
@@ -2309,7 +2314,6 @@ async fn handle_code_execution_job(
                 canceled_by,
                 worker_name,
                 column_order,
-                occupancy_metrics,
             )
             .await;
         }
@@ -2332,7 +2336,6 @@ async fn handle_code_execution_job(
                 canceled_by,
                 worker_name,
                 column_order,
-                occupancy_metrics,
             )
             .await;
         }
@@ -2354,7 +2357,6 @@ async fn handle_code_execution_job(
                 mem_peak,
                 canceled_by,
                 worker_name,
-                occupancy_metrics,
             )
             .await;
         }
@@ -2367,7 +2369,6 @@ async fn handle_code_execution_job(
             mem_peak,
             canceled_by,
             worker_name,
-            occupancy_metrics,
         )
         .await;
     } else if language == Some(ScriptLang::Nativets) {
@@ -2398,7 +2399,6 @@ async fn handle_code_execution_job(
             mem_peak,
             canceled_by,
             worker_name,
-            occupancy_metrics,
         )
         .await?;
         return Ok(result);
@@ -2463,7 +2463,6 @@ mount {{
                 base_internal_url,
                 envs,
                 new_args,
-                occupancy_metrics,
             )
             .await
         }
@@ -2481,7 +2480,6 @@ mount {{
                 worker_name,
                 envs,
                 new_args,
-                occupancy_metrics,
             )
             .await
         }
@@ -2501,7 +2499,6 @@ mount {{
                 envs,
                 &shared_mount,
                 new_args,
-                occupancy_metrics,
             )
             .await
         }
@@ -2519,7 +2516,6 @@ mount {{
                 base_internal_url,
                 worker_name,
                 envs,
-                occupancy_metrics,
             )
             .await
         }
@@ -2536,7 +2532,6 @@ mount {{
                 base_internal_url,
                 worker_name,
                 envs,
-                occupancy_metrics,
             )
             .await
         }
@@ -2553,7 +2548,6 @@ mount {{
                 base_internal_url,
                 worker_name,
                 envs,
-                occupancy_metrics,
             )
             .await
         }
@@ -2571,7 +2565,6 @@ mount {{
                 worker_name,
                 envs,
                 &shared_mount,
-                occupancy_metrics,
             )
             .await
         }
@@ -2589,7 +2582,6 @@ mount {{
                 base_internal_url,
                 worker_name,
                 envs,
-                occupancy_metrics,
             )
             .await
         }
@@ -2608,7 +2600,6 @@ mount {{
                 &shared_mount,
                 base_internal_url,
                 envs,
-                occupancy_metrics,
             )
             .await
         }

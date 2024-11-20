@@ -17,7 +17,7 @@ use windmill_queue::{CanceledBy, HTTP_CLIENT};
 
 use serde::{Deserialize, Serialize};
 
-use crate::common::{resolve_job_timeout, OccupancyMetrics};
+use crate::common::resolve_job_timeout;
 use crate::handle_child::run_future_with_polling_update_job_poller;
 use crate::{common::build_args_values, AuthedClientBackgroundTask};
 
@@ -247,7 +247,6 @@ pub async fn do_snowflake(
     canceled_by: &mut Option<CanceledBy>,
     worker_name: &str,
     column_order: &mut Option<Vec<String>>,
-    occupancy_metrics: &mut OccupancyMetrics,
 ) -> windmill_common::error::Result<Box<RawValue>> {
     let snowflake_args = build_args_values(job, client, db).await?;
 
@@ -418,7 +417,6 @@ pub async fn do_snowflake(
         result_f.map_err(to_anyhow),
         worker_name,
         &job.workspace_id,
-        &mut Some(occupancy_metrics),
     )
     .await?;
     *mem_peak = (r.get().len() / 1000) as i32;

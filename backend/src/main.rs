@@ -157,7 +157,6 @@ async fn cache_hub_scripts(file_path: Option<String>) -> anyhow::Result<()> {
                 "global",
                 "global",
                 "",
-                &mut None,
             )
             .await?;
             tokio::fs::remove_dir_all(job_dir).await?;
@@ -178,7 +177,6 @@ async fn cache_hub_scripts(file_path: Option<String>) -> anyhow::Result<()> {
                     "cache_init",
                     envs.clone(),
                     false,
-                    &mut None,
                 )
                 .await?;
 
@@ -195,7 +193,6 @@ async fn cache_hub_scripts(file_path: Option<String>) -> anyhow::Result<()> {
                     "",
                     "cache_init",
                     "",
-                    &mut None,
                 )
                 .await
                 {

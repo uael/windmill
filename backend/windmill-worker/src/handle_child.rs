@@ -46,7 +46,7 @@ use futures::{
     stream, StreamExt,
 };
 
-use crate::common::{resolve_job_timeout, OccupancyMetrics};
+use crate::common::resolve_job_timeout;
 use crate::job_logger::{append_job_logs, append_with_limit, LARGE_LOG_THRESHOLD_SIZE};
 use crate::job_logger_ee::process_streaming_log_lines;
 use crate::{MAX_RESULT_SIZE, MAX_WAIT_FOR_SIGINT, MAX_WAIT_FOR_SIGTERM};
@@ -100,7 +100,6 @@ pub async fn handle_child(
     child_name: &str,
     custom_timeout: Option<i32>,
     sigterm: bool,
-    occupancy_metrics: &mut Option<&mut OccupancyMetrics>,
 ) -> error::Result<()> {
     let start = Instant::now();
 
@@ -141,7 +140,6 @@ pub async fn handle_child(
         worker,
         w_id,
         rx,
-        occupancy_metrics,
     );
 
     enum KillReason {
@@ -497,7 +495,6 @@ pub async fn run_future_with_polling_update_job_poller<Fut, T>(
     result_f: Fut,
     worker_name: &str,
     w_id: &str,
-    occupancy_metrics: &mut Option<&mut OccupancyMetrics>,
 ) -> error::Result<T>
 where
     Fut: Future<Output = anyhow::Result<T>>,
@@ -513,7 +510,6 @@ where
         worker_name,
         w_id,
         rx,
-        occupancy_metrics,
     );
 
     let timeout_ms = u64::try_from(
@@ -559,7 +555,6 @@ pub async fn update_job_poller<F, Fut>(
     worker_name: &str,
     w_id: &str,
     mut rx: broadcast::Receiver<()>,
-    occupancy_metrics: &mut Option<&mut OccupancyMetrics>,
 ) -> UpdateJobPollingExit
 where
     F: Fn() -> Fut,
@@ -588,25 +583,6 @@ where
                     let memory_usage = get_worker_memory_usage();
                     let wm_memory_usage = get_windmill_memory_usage();
                     tracing::info!("job {job_id} on {worker_name} in {w_id} worker memory snapshot {}kB/{}kB", memory_usage.unwrap_or_default()/1024, wm_memory_usage.unwrap_or_default()/1024);
-                    let occupancy = occupancy_metrics.as_mut().map(|x| x.update_occupancy_metrics());
-                    if job_id != Uuid::nil() {
-                        sqlx::query!(
-                            "UPDATE worker_ping SET ping_at = now(), current_job_id = $1, current_job_workspace_id = $2, memory_usage = $3, wm_memory_usage = $4,
-                            occupancy_rate = $6, occupancy_rate_15s = $7, occupancy_rate_5m = $8, occupancy_rate_30m = $9 WHERE worker = $5",
-                            &job_id,
-                            &w_id,
-                            memory_usage,
-                            wm_memory_usage,
-                            &worker_name,
-                            occupancy.map(|x| x.0),
-                            occupancy.and_then(|x| x.1),
-                            occupancy.and_then(|x| x.2),
-                            occupancy.and_then(|x| x.3),
-                        )
-                        .execute(&db)
-                        .await
-                        .expect("update worker ping");
-                    }
                 }
                 let current_mem = get_mem().await;
                 if current_mem > *mem_peak {
