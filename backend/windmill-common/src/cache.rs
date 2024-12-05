@@ -2,7 +2,7 @@ use crate::error;
 
 use std::path::{Path, PathBuf};
 
-use quick_cache::sync::Cache;
+pub use quick_cache::sync::Cache;
 use sqlx::PgExecutor;
 
 /// Cache directory for windmill server/worker(s).
@@ -280,6 +280,103 @@ pub mod script {
     }
 }
 
+pub mod app {
+    use super::*;
+    use crate::apps::AppScriptId;
+
+    /// Cache directory for windmill server/worker(s) app scripts.
+    pub const CACHE_DIR: &str = const_format::concatcp!(super::CACHE_DIR, "app");
+
+    lazy_static::lazy_static! {
+        /// App scripts cache.
+        /// FIXME: This should be a static but [`Cache`] does not have a const constructor.
+        /// FIXME: Use `Arc<Val>` for cheap cloning.
+        static ref CACHE: Cache<AppScriptId, Val> = Cache::new(1000);
+    }
+
+    /// App app script cache value.
+    #[derive(Debug, Clone, Default)]
+    pub struct Val {
+        pub lock: Option<String>,
+        pub code: String,
+    }
+
+    /// Fetch the app script referenced by `id` from the cache.
+    /// If not present, import from the file-system cache or fetch it from the database and write
+    /// it to the file system and cache.
+    /// This should be preferred over fetching the database directly.
+    pub async fn fetch_script(
+        e: impl PgExecutor<'_>,
+        id: AppScriptId,
+    ) -> error::Result<(Option<String>, String)> {
+        // If not present, `get_or_insert_async` will lock the key until the future completes,
+        // so only one thread will be able to fetch the data from the database and write it to
+        // the file system and cache, hence no race on the file system.
+        CACHE
+            .get_or_insert_async(
+                &id,
+                fs::import_or_insert_with(CACHE_DIR, id.0 as u64, async {
+                    sqlx::query!(
+                        "SELECT lock, code FROM app_script WHERE id = $1 LIMIT 1",
+                        id.0,
+                    )
+                    .fetch_one(e)
+                    .await
+                    .map_err(Into::into)
+                    .map(|r| Val {
+                        lock: r
+                            .lock
+                            .and_then(|x| if x.is_empty() { None } else { Some(x) }),
+                        code: r.code,
+                    })
+                }),
+            )
+            .await
+            .map(|Val { lock, code }| (lock, code))
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // impl `fs::Bundle` for `Val`.
+
+    #[derive(Copy, Clone)]
+    pub enum Item {
+        Lock,
+        Code,
+    }
+
+    impl fs::Item for Item {
+        fn path(&self, root: &Path) -> PathBuf {
+            match self {
+                Item::Lock => root.join("lock.txt"),
+                Item::Code => root.join("code.txt"),
+            }
+        }
+    }
+
+    impl fs::Bundle for Val {
+        type Item = Item;
+
+        fn items() -> &'static [Self::Item] {
+            &[Item::Lock, Item::Code]
+        }
+
+        fn import(&mut self, item: Self::Item, data: Vec<u8>) -> error::Result<()> {
+            match item {
+                Item::Lock => self.lock = Some(String::from_utf8(data)?),
+                Item::Code => self.code = String::from_utf8(data)?,
+            }
+            Ok(())
+        }
+
+        fn export(&self, item: Self::Item) -> error::Result<Option<Vec<u8>>> {
+            match item {
+                Item::Lock => Ok(self.lock.as_ref().map(|s| s.as_bytes().to_vec())),
+                Item::Code => Ok(Some(self.code.as_bytes().to_vec())),
+            }
+        }
+    }
+}
+
 mod fs {
     use super::*;
 
@@ -364,3 +461,22 @@ mod fs {
         Ok(data)
     }
 }
+
+// ----------------------------------------------------------------------------------------------
+// `cached!` macro.
+
+/// A macro to cache the result of an async function.
+#[macro_export]
+macro_rules! cached {
+    ($cap:literal, $Key:ty => $Val:ty, $key:expr, $fut:expr) => {{
+        ::lazy_static::lazy_static! {
+            static ref CACHE: $crate::cache::Cache<$Key, $Val> =
+                $crate::cache::Cache::new($cap);
+        }
+
+        CACHE.get_or_insert_async($key, $fut)
+    }};
+}
+
+// re-export:
+pub use cached;
