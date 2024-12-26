@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "version": "1.423.2",
+    "version": "1.441.1",
     "title": "Windmill API",
     "contact": {
       "name": "Windmill Team",
@@ -616,6 +616,9 @@
                 "type": "object",
                 "properties": {
                   "is_super_admin": {
+                    "type": "boolean"
+                  },
+                  "is_devops": {
                     "type": "boolean"
                   },
                   "name": {
@@ -1329,9 +1332,24 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CriticalAlert"
+                  "type": "object",
+                  "properties": {
+                    "alerts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CriticalAlert"
+                      }
+                    },
+                    "total_rows": {
+                      "type": "integer",
+                      "description": "Total number of rows matching the query.",
+                      "example": 100
+                    },
+                    "total_pages": {
+                      "type": "integer",
+                      "description": "Total number of pages based on the page size.",
+                      "example": 10
+                    }
                   }
                 }
               }
@@ -1670,9 +1688,19 @@
         "tags": [
           "user"
         ],
+        "parameters": [
+          {
+            "name": "if_expiring_in_less_than_s",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "free usage",
+            "description": "new token",
             "content": {
               "text/plain": {
                 "schema": {
@@ -2593,6 +2621,9 @@
                     },
                     "default_scripts": {
                       "$ref": "#/components/schemas/WorkspaceDefaultScripts"
+                    },
+                    "mute_critical_alerts": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -3578,11 +3609,15 @@
                     },
                     "websocket_used": {
                       "type": "boolean"
+                    },
+                    "kafka_used": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "http_routes_used",
-                    "websocket_used"
+                    "websocket_used",
+                    "kafka_used"
                   ]
                 }
               }
@@ -4204,6 +4239,186 @@
                   "items": {
                     "$ref": "#/components/schemas/ContextualVariable"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/workspaces/critical_alerts": {
+      "get": {
+        "summary": "Get all critical alerts for this workspace",
+        "operationId": "workspaceGetCriticalAlerts",
+        "tags": [
+          "setting"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "description": "The page number to retrieve (minimum value is 1)"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 100,
+              "description": "Number of alerts per page (maximum is 100)"
+            }
+          },
+          {
+            "in": "query",
+            "name": "acknowledged",
+            "schema": {
+              "type": "boolean",
+              "nullable": true,
+              "description": "Filter by acknowledgment status; true for acknowledged, false for unacknowledged, and omit for all alerts"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved all critical alerts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "alerts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CriticalAlert"
+                      }
+                    },
+                    "total_rows": {
+                      "type": "integer",
+                      "description": "Total number of rows matching the query.",
+                      "example": 100
+                    },
+                    "total_pages": {
+                      "type": "integer",
+                      "description": "Total number of pages based on the page size.",
+                      "example": 10
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/workspaces/critical_alerts/{id}/acknowledge": {
+      "post": {
+        "summary": "Acknowledge a critical alert for this workspace",
+        "operationId": "workspaceAcknowledgeCriticalAlert",
+        "tags": [
+          "setting"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The ID of the critical alert to acknowledge"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully acknowledged the critical alert",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": "Critical alert acknowledged"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/workspaces/critical_alerts/acknowledge_all": {
+      "post": {
+        "summary": "Acknowledge all unacknowledged critical alerts for this workspace",
+        "operationId": "workspaceAcknowledgeAllCriticalAlerts",
+        "tags": [
+          "setting"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully acknowledged all unacknowledged critical alerts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": "All unacknowledged critical alerts acknowledged"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/workspaces/critical_alerts/mute": {
+      "post": {
+        "summary": "Mute critical alert UI for this workspace",
+        "operationId": "workspaceMuteCriticalAlertsUI",
+        "tags": [
+          "setting"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          }
+        ],
+        "requestBody": {
+          "description": "Boolean flag to mute critical alerts.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mute_critical_alerts": {
+                    "type": "boolean",
+                    "description": "Whether critical alerts should be muted.",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully updated mute critical alert settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": "Updated mute critical alert UI settings for workspace: workspace_id"
                 }
               }
             }
@@ -5629,6 +5844,44 @@
                   },
                   "required": [
                     "app"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apps_u/public_app_by_custom_path/{custom_path}": {
+      "get": {
+        "summary": "get public app by custom path",
+        "operationId": "getPublicAppByCustomPath",
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CustomPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "app details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/AppWithLastVersion"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "workspace_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
                   ]
                 }
               }
@@ -8267,6 +8520,9 @@
                   },
                   "deployment_message": {
                     "type": "string"
+                  },
+                  "custom_path": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -8347,6 +8603,35 @@
         "responses": {
           "200": {
             "description": "app details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppWithLastVersion"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/apps/get/lite/{path}": {
+      "get": {
+        "summary": "get app lite by path",
+        "operationId": "getAppLiteByPath",
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/ScriptPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "app lite details",
             "content": {
               "application/json": {
                 "schema": {
@@ -8808,6 +9093,9 @@
                   },
                   "deployment_message": {
                     "type": "string"
+                  },
+                  "custom_path": {
+                    "type": "string"
                   }
                 }
               }
@@ -8821,6 +9109,35 @@
               "text/plain": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/apps/custom_path_exists/{custom_path}": {
+      "get": {
+        "summary": "check if custom path exists",
+        "operationId": "customPathExists",
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/CustomPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "custom path exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
                 }
               }
             }
@@ -8857,6 +9174,9 @@
                   "path": {
                     "type": "string"
                   },
+                  "version": {
+                    "type": "integer"
+                  },
                   "args": {},
                   "raw_code": {
                     "type": "object",
@@ -8881,6 +9201,9 @@
                       "content",
                       "language"
                     ]
+                  },
+                  "id": {
+                    "type": "integer"
                   },
                   "force_viewer_static_fields": {
                     "type": "object"
@@ -9580,6 +9903,60 @@
                   "required": [
                     "database_length"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/jobs/completed/count_jobs": {
+      "get": {
+        "summary": "count number of completed jobs with filter",
+        "operationId": "countCompletedJobs",
+        "tags": [
+          "job"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "name": "completed_after_s_ago",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "success",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "all_workspaces",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count of completed jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "integer"
                 }
               }
             }
@@ -10728,6 +11105,66 @@
         }
       }
     },
+    "/w/{workspace}/jobs/slack_approval/{id}": {
+      "get": {
+        "summary": "generate interactive slack approval for suspended job",
+        "operationId": "getSlackApprovalPayload",
+        "tags": [
+          "job"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/JobId"
+          },
+          {
+            "name": "approver",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slack_resource_path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channel_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow_step_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Interactive slack approval message sent successfully"
+          }
+        }
+      }
+    },
     "/w/{workspace}/jobs_u/resume/{id}/{resume_id}/{signature}": {
       "get": {
         "summary": "resume a job for a suspended flow",
@@ -11171,6 +11608,9 @@
                     "type": "string"
                   },
                   "timezone": {
+                    "type": "string"
+                  },
+                  "cron_version": {
                     "type": "string"
                   }
                 },
@@ -12107,6 +12547,276 @@
         "responses": {
           "200": {
             "description": "websocket trigger enabled set",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/create": {
+      "post": {
+        "summary": "create kafka trigger",
+        "operationId": "createKafkaTrigger",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          }
+        ],
+        "requestBody": {
+          "description": "new kafka trigger",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewKafkaTrigger"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "kafka trigger created",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/update/{path}": {
+      "post": {
+        "summary": "update kafka trigger",
+        "operationId": "updateKafkaTrigger",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/Path"
+          }
+        ],
+        "requestBody": {
+          "description": "updated trigger",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditKafkaTrigger"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "kafka trigger updated",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/delete/{path}": {
+      "delete": {
+        "summary": "delete kafka trigger",
+        "operationId": "deleteKafkaTrigger",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/Path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "kafka trigger deleted",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/get/{path}": {
+      "get": {
+        "summary": "get kafka trigger",
+        "operationId": "getKafkaTrigger",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/Path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "kafka trigger deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KafkaTrigger"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/list": {
+      "get": {
+        "summary": "list kafka triggers",
+        "operationId": "listKafkaTriggers",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId",
+            "required": true
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PerPage"
+          },
+          {
+            "name": "path",
+            "description": "filter by path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "is_flow",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "path_start",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "kafka trigger list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KafkaTrigger"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/exists/{path}": {
+      "get": {
+        "summary": "does kafka trigger exists",
+        "operationId": "existsKafkaTrigger",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/Path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "kafka trigger exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/w/{workspace}/kafka_triggers/setenabled/{path}": {
+      "post": {
+        "summary": "set enabled kafka trigger",
+        "operationId": "setKafkaTriggerEnabled",
+        "tags": [
+          "kafka_trigger"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/Path"
+          }
+        ],
+        "requestBody": {
+          "description": "updated kafka trigger enable",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "kafka trigger enabled set",
             "content": {
               "text/plain": {
                 "schema": {
@@ -13498,7 +14208,8 @@
                 "app",
                 "raw_app",
                 "http_trigger",
-                "websocket_trigger"
+                "websocket_trigger",
+                "kafka_trigger"
               ]
             }
           }
@@ -13551,7 +14262,8 @@
                 "app",
                 "raw_app",
                 "http_trigger",
-                "websocket_trigger"
+                "websocket_trigger",
+                "kafka_trigger"
               ]
             }
           }
@@ -13623,7 +14335,8 @@
                 "app",
                 "raw_app",
                 "http_trigger",
-                "websocket_trigger"
+                "websocket_trigger",
+                "kafka_trigger"
               ]
             }
           }
@@ -15738,14 +16451,6 @@
             }
           },
           {
-            "name": "hosts",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "min_ts",
             "in": "query",
             "required": false,
@@ -15784,6 +16489,41 @@
                       "type": "object"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/srch/index/delete/{idx_name}": {
+      "delete": {
+        "summary": "Restart container and delete the index to recreate it.",
+        "operationId": "clearIndex",
+        "tags": [
+          "indexSearch"
+        ],
+        "parameters": [
+          {
+            "name": "idx_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "JobIndex",
+                "ServiceLogIndex"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "idx to be deleted and container restarting",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -15880,6 +16620,14 @@
       },
       "Path": {
         "name": "path",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CustomPath": {
+        "name": "custom_path",
         "in": "path",
         "required": true,
         "schema": {
@@ -16354,7 +17102,8 @@
               "bun",
               "php",
               "rust",
-              "ansible"
+              "ansible",
+              "csharp"
             ]
           },
           "kind": {
@@ -16492,7 +17241,8 @@
               "bun",
               "php",
               "rust",
-              "ansible"
+              "ansible",
+              "csharp"
             ]
           },
           "kind": {
@@ -16758,7 +17508,10 @@
               "script_hub",
               "identity",
               "deploymentcallback",
-              "singlescriptflow"
+              "singlescriptflow",
+              "flowscript",
+              "flownode",
+              "appscript"
             ]
           },
           "schedule_path": {
@@ -16795,7 +17548,8 @@
               "bun",
               "php",
               "rust",
-              "ansible"
+              "ansible",
+              "csharp"
             ]
           },
           "email": {
@@ -16907,7 +17661,10 @@
               "script_hub",
               "identity",
               "deploymentcallback",
-              "singlescriptflow"
+              "singlescriptflow",
+              "flowscript",
+              "flownode",
+              "appscript"
             ]
           },
           "schedule_path": {
@@ -16944,7 +17701,8 @@
               "bun",
               "php",
               "rust",
-              "ansible"
+              "ansible",
+              "csharp"
             ]
           },
           "is_skipped": {
@@ -17064,6 +17822,9 @@
           },
           "is_admin": {
             "type": "boolean"
+          },
+          "name": {
+            "type": "string"
           },
           "is_super_admin": {
             "type": "boolean"
@@ -17700,7 +18461,8 @@
               "bun",
               "php",
               "rust",
-              "ansible"
+              "ansible",
+              "csharp"
             ]
           },
           "tag": {
@@ -18013,6 +18775,9 @@
           "paused_until": {
             "type": "string",
             "format": "date-time"
+          },
+          "cron_version": {
+            "type": "string"
           }
         },
         "required": [
@@ -18131,6 +18896,9 @@
           "paused_until": {
             "type": "string",
             "format": "date-time"
+          },
+          "cron_version": {
+            "type": "string"
           }
         },
         "required": [
@@ -18199,6 +18967,9 @@
           "paused_until": {
             "type": "string",
             "format": "date-time"
+          },
+          "cron_version": {
+            "type": "string"
           }
         },
         "required": [
@@ -18434,6 +19205,9 @@
             "type": "number"
           },
           "websocket_count": {
+            "type": "number"
+          },
+          "kafka_count": {
             "type": "number"
           }
         }
@@ -18672,6 +19446,149 @@
               "runnable_result"
             ]
           }
+        ]
+      },
+      "KafkaTrigger": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "edited_by": {
+            "type": "string"
+          },
+          "edited_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "script_path": {
+            "type": "string"
+          },
+          "kafka_resource_path": {
+            "type": "string"
+          },
+          "group_id": {
+            "type": "string"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_flow": {
+            "type": "boolean"
+          },
+          "extra_perms": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "email": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string"
+          },
+          "last_server_ping": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "edited_by",
+          "edited_at",
+          "script_path",
+          "kafka_resource_path",
+          "group_id",
+          "topics",
+          "extra_perms",
+          "is_flow",
+          "email",
+          "workspace_id",
+          "enabled"
+        ]
+      },
+      "NewKafkaTrigger": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "script_path": {
+            "type": "string"
+          },
+          "is_flow": {
+            "type": "boolean"
+          },
+          "kafka_resource_path": {
+            "type": "string"
+          },
+          "group_id": {
+            "type": "string"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "script_path",
+          "is_flow",
+          "kafka_resource_path",
+          "group_id",
+          "topics"
+        ]
+      },
+      "EditKafkaTrigger": {
+        "type": "object",
+        "properties": {
+          "kafka_resource_path": {
+            "type": "string"
+          },
+          "group_id": {
+            "type": "string"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "script_path": {
+            "type": "string"
+          },
+          "is_flow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "script_path",
+          "kafka_resource_path",
+          "group_id",
+          "topics",
+          "is_flow"
         ]
       },
       "Group": {
@@ -18942,6 +19859,9 @@
             ]
           },
           "super_admin": {
+            "type": "boolean"
+          },
+          "devops": {
             "type": "boolean"
           },
           "verified": {
@@ -19287,6 +20207,9 @@
             "additionalProperties": {
               "type": "boolean"
             }
+          },
+          "custom_path": {
+            "type": "string"
           }
         },
         "required": [
@@ -19792,7 +20715,8 @@
               "bun",
               "php",
               "rust",
-              "ansible"
+              "ansible",
+              "csharp"
             ]
           }
         },
@@ -20000,6 +20924,11 @@
             "type": "boolean",
             "nullable": true,
             "description": "Acknowledgment status of the alert, can be true, false, or null if not set"
+          },
+          "workspace_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Workspace id if the alert is in the scope of a workspace"
           }
         }
       },
