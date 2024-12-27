@@ -38,7 +38,7 @@
           target = pkgs.hostPlatform.rust.rustcTarget;
           sha256 = {
             x86_64-linux = "sha256-qc25H3Aj2KRhsAZ+2SD1c4RmweVK07oW71opZXRuUoc=";
-            aarch64-linux = pkgs.lib.fakeHash;
+            aarch64-linux = "sha256-qc25H3Aj2KRhsAZ+2SD1c4RmweVK07oW71opZXRuUoc=";
             x86_64-darwin = pkgs.lib.fakeHash;
             aarch64-darwin = "sha256-d1QTLt8gOUFxACes4oyIYgDF/srLOEk+5p5Oj1ECajQ=";
           }.${system};
@@ -90,7 +90,7 @@
             npm run dev $*
           '')
         ];
-      
+
         inherit PKG_CONFIG_PATH RUSTY_V8_ARCHIVE;
         NODE_ENV = "development";
         NODE_OPTIONS = "--max-old-space-size=16384";
@@ -98,6 +98,7 @@
         REMOTE = "http://127.0.0.1:8000";
         REMOTE_LSP = "http://127.0.0.1:3001";
         RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
+        SCCACHE_DIR = "/nix/var/cache/sccache";
         DENO_PATH = "${pkgs.deno}/bin/deno";
         PYTHON_PATH = "${pkgs.python3}/bin/python3";
         GO_PATH = "${pkgs.go}/bin/go";
@@ -135,28 +136,59 @@
 
         NODE_OPTIONS = "--max-old-space-size=8192";
       };
-      packages.windmill = craneLib.buildPackage {
+#      packages.windmill = craneLib.buildPackage {
+#        pname = "windmill";
+#        version = (pkgs.lib.strings.trim (builtins.readFile ./version.txt));
+#        strictDeps = true;
+#      
+#        src = pkgs.nix-gitignore.gitignoreSource [] ./backend;
+#        nativeBuildInputs = buildInputs ++ [ self.packages.${system}.windmill-client pkgs.perl ];
+#        doCheck = false;
+#      
+#        cargoExtraArgs = "--features " +
+#          "enterprise,enterprise_saml,stripe,embedding,parquet,prometheus,openidconnect,cloud,jemalloc,tantivy," +
+#          "deno_core,license,http_trigger,zip,oauth2,kafka,otel,dind,php,mysql,mssql,bigquery,websocket,python,smtp," +
+#          "csharp,static_frontend,rust";
+#      
+#        postUnpack = ''
+#          cp ${./backend/windmill-api/openapi-deref.json} ./backend/windmill-api/openapi-deref.json
+#          cp ${./backend/windmill-api/openapi-deref.yaml} ./backend/windmill-api/openapi-deref.yaml
+#        '';
+#      
+#        inherit PKG_CONFIG_PATH RUSTY_V8_ARCHIVE;
+#        SQLX_OFFLINE = true;
+#        FRONTEND_BUILD_DIR = "${self.packages.${system}.windmill-client}/build";
+#      };
+      packages.windmill = pkgs.rustPlatform.buildRustPackage {
         pname = "windmill";
         version = (pkgs.lib.strings.trim (builtins.readFile ./version.txt));
-        strictDeps = true;
       
-        src = pkgs.nix-gitignore.gitignoreSource [] ./backend;
+        src = ./backend;
+        buildInputs = [ pkgs.sccache ];
         nativeBuildInputs = buildInputs ++ [ self.packages.${system}.windmill-client pkgs.perl ];
+      
+        cargoLock = {
+          lockFile = ./backend/Cargo.lock;
+          outputHashes = {
+            "php-parser-rs-0.1.3" = "sha256-ZeI3KgUPmtjlRfq6eAYveqt8Ay35gwj6B9iOQRjQa9A=";
+            "progenitor-0.3.0" = "sha256-F6XRZFVIN6/HfcM8yI/PyNke45FL7jbcznIiqj22eIQ=";
+            "tinyvector-0.1.0" = "sha256-NYGhofU4rh+2IAM+zwe04YQdXY8Aa4gTmn2V2HtzRfI=";
+          };
+        };
+      
         doCheck = false;
-      
-        cargoExtraArgs = "--features " +
-          "enterprise,enterprise_saml,stripe,embedding,parquet,prometheus,openidconnect,cloud,jemalloc,tantivy," +
-          "deno_core,license,http_trigger,zip,oauth2,kafka,otel,dind,php,mysql,mssql,bigquery,websocket,python,smtp," +
-          "csharp,static_frontend,rust";
-      
-        postUnpack = ''
-          cp ${./backend/windmill-api/openapi-deref.json} ./backend/windmill-api/openapi-deref.json
-          cp ${./backend/windmill-api/openapi-deref.yaml} ./backend/windmill-api/openapi-deref.yaml
-        '';
+        buildFeatures = [
+          "enterprise" "enterprise_saml" "stripe" "embedding" "parquet" "prometheus"
+          "openidconnect" "cloud" "jemalloc" "tantivy" "deno_core" "license" "http_trigger"
+          "zip" "oauth2" "kafka" "otel" "dind" "php" "mysql" "mssql" "bigquery" "websocket"
+          "python" "smtp" "csharp" "static_frontend" "rust"
+        ];
       
         inherit PKG_CONFIG_PATH RUSTY_V8_ARCHIVE;
         SQLX_OFFLINE = true;
         FRONTEND_BUILD_DIR = "${self.packages.${system}.windmill-client}/build";
+        RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
+        SCCACHE_DIR = "/nix/var/cache/sccache";
       };
     });
 }
