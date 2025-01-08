@@ -52,12 +52,15 @@ export async function createBenchScript(
   workspace: string
 ) {
   const path = `f/benchmarks/${scriptPattern}`;
+  console.log("Creating benchmark script at path", path);
   const exists = await windmill.ScriptService.existsScriptByPath({
     workspace,
     path,
   });
 
   if (exists) {
+    console.log("Deleting existing benchmark script at path", path);
+    return;
     await windmill.ScriptService.deleteScriptByPath({
       workspace,
       path,

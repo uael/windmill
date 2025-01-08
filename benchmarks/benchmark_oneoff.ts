@@ -1,16 +1,16 @@
 /// <reference no-default-lib="true" />
 /// <reference lib="deno.window" />
 
-import { Command } from "https://deno.land/x/cliffy@v0.25.7/command/mod.ts";
-import { UpgradeCommand } from "https://deno.land/x/cliffy@v0.25.7/command/upgrade/upgrade_command.ts";
-import { DenoLandProvider } from "https://deno.land/x/cliffy@v0.25.7/command/upgrade/mod.ts";
+import {Command} from "https://deno.land/x/cliffy@v0.25.7/command/mod.ts";
+import {UpgradeCommand} from "https://deno.land/x/cliffy@v0.25.7/command/upgrade/upgrade_command.ts";
+import {DenoLandProvider} from "https://deno.land/x/cliffy@v0.25.7/command/upgrade/mod.ts";
 
-import { sleep } from "https://deno.land/x/sleep@v1.2.1/mod.ts";
+import {sleep} from "https://deno.land/x/sleep@v1.2.1/mod.ts";
 
 import * as windmill from "https://deno.land/x/windmill@v1.174.0/mod.ts";
 import * as api from "https://deno.land/x/windmill@v1.174.0/windmill-api/index.ts";
 
-import { VERSION, createBenchScript, getFlowPayload, login } from "./lib.ts";
+import {VERSION, createBenchScript, getFlowPayload, login} from "./lib.ts";
 
 async function verifyOutputs(uuids: string[], workspace: string) {
   console.log("Verifying outputs");
@@ -38,15 +38,15 @@ async function verifyOutputs(uuids: string[], workspace: string) {
 }
 
 export async function main({
-  host,
-  email,
-  password,
-  token,
-  workspace,
-  kind,
-  jobs,
-  noVerify,
-}: {
+                             host,
+                             email,
+                             password,
+                             token,
+                             workspace,
+                             kind,
+                             jobs,
+                             noVerify,
+                           }: {
   host: string;
   email?: string;
   password?: string;
@@ -101,7 +101,7 @@ export async function main({
       await (
         await fetch(
           config.server + "/api/w/" + config.workspace_id + "/jobs/queue/count",
-          { headers: { ["Authorization"]: "Bearer " + config.token } }
+          {headers: {["Authorization"]: "Bearer " + config.token}}
         )
       ).json()
     ).database_length;
@@ -113,7 +113,7 @@ export async function main({
   ): Promise<number> {
     const response = await fetch(
       `${config.server}/api/w/${workspace}/flows/get/${path}`,
-      { headers: { ["Authorization"]: "Bearer " + config.token } }
+      {headers: {["Authorization"]: "Bearer " + config.token}}
     );
 
     const data = await response.json();
@@ -131,19 +131,6 @@ export async function main({
     return stepCount;
   }
 
-  let pastJobs = 0;
-  async function getCompletedJobsCount(): Promise<number> {
-    const completedJobs = (
-      await (
-        await fetch(
-          host + "/api/w/" + config.workspace_id + "/jobs/completed/count",
-          { headers: { ["Authorization"]: "Bearer " + config.token } }
-        )
-      ).json()
-    ).database_length;
-    return completedJobs - pastJobs;
-  }
-
   if (
     ["deno", "python", "go", "bash", "dedicated", "bun", "nativets"].includes(
       kind
@@ -151,8 +138,6 @@ export async function main({
   ) {
     await createBenchScript(kind, workspace);
   }
-
-  pastJobs = await getCompletedJobsCount();
 
   const jobsSent = jobs;
   console.log(`Bulk creating ${jobsSent} jobs`);
@@ -208,11 +193,12 @@ export async function main({
     throw new Error("Unknown script pattern " + kind);
   }
 
+  console.log("Creating jobs with body");
   const response = await fetch(
     config.server +
-      "/api/w/" +
-      config.workspace_id +
-      `/jobs/add_batch_jobs/${jobsSent}`,
+    "/api/w/" +
+    config.workspace_id +
+    `/jobs/add_batch_jobs/${jobsSent}`,
     {
       method: "POST",
       headers: {
@@ -222,78 +208,107 @@ export async function main({
       body,
     }
   );
+  console.log("Created jobs with body");
   if (!response.ok) {
     throw new Error(
       "Failed to create jobs: " +
-        response.statusText +
-        " " +
-        (await response.text())
+      response.statusText +
+      " " +
+      (await response.text())
     );
   }
   const uuids = await response.json();
   const end_create = Date.now();
   const create_duration = end_create - start_create;
-  console.log(
-    `Jobs successfully added to the queue in ${
-      create_duration / 1000
-    }s. Windmill will start pulling them\n`
-  );
-  let start = Date.now();
 
-  let completedJobs = 0;
+  console.log(
+    `Jobs successfully added to the queue in ${(create_duration / 1000).toFixed(
+      2
+    )}s. Windmill will start pulling them.\n`
+  );
+
+  const start = Date.now();
+
+  // We create an array of the same length as uuids, initialized to false
+  // to track which jobs have completed.
+  const completionStatus = new Array(uuids.length).fill(false);
+
+  // Variables for throughput logging
   let lastElapsed = 0;
   let lastCompletedJobs = 0;
 
-  let didStart = false;
-  while (completedJobs < jobsSent) {
-    const loopStart = Date.now();
-    if (!didStart) {
-      const actual_queue = await getQueueCount();
-      if (actual_queue < jobsSent) {
-        start = Date.now();
-        didStart = true;
+  async function isCompleted(id: string): Promise<boolean> {
+    return (await fetch(
+      config.server +
+      "/api/w/" +
+      config.workspace_id +
+      `/jobs_u/getupdate/${id}?running=true&log_offset=0`,
+      {
+        headers: {
+          ["Authorization"]: "Bearer " + config.token,
+          "Content-Type": "application/json",
+        },
       }
-    } else {
-      const elapsed = start ? Date.now() - start : 0;
-      completedJobs = await getCompletedJobsCount();
-      if (nStepsFlow > 0) {
-        completedJobs = Math.floor(completedJobs / (nStepsFlow + 1));
-      }
-      const avgThr = ((completedJobs / elapsed) * 1000).toFixed(2);
-      const instThr =
-        lastElapsed > 0
-          ? (
-              ((completedJobs - lastCompletedJobs) / (elapsed - lastElapsed)) *
-              1000
-            ).toFixed(2)
-          : 0;
-
-      lastElapsed = elapsed;
-      lastCompletedJobs = completedJobs;
-
-      await Deno.stdout.write(
-        enc(
-          `elapsed: ${(elapsed / 1000).toFixed(
-            2
-          )} | jobs executed: ${completedJobs}/${jobsSent} (thr: inst ${instThr} - avg ${avgThr}) | remaining: ${
-            jobsSent - completedJobs
-          }                          \r`
-        )
-      );
-    }
-    const loopDuration = (Date.now() - loopStart) / 1000.0;
-    if (loopDuration < 0.05) {
-      await sleep(0.05 - loopDuration);
-    }
+    )).json();
   }
 
-  const total_duration_sec = (Date.now() - start) / 1000.0;
+  // Build an array of Promises (one per UUID)
+  Promise.all(uuids.map(async (uuid, i) => {
+    // Only check if we haven't already marked it as true
+    while (!completionStatus[i]) {
+      const result = await isCompleted(uuid);
+      completionStatus[i] = result.completed === true;
+    }
+  }));
+
+  while (true) {
+    // Optional: throughput logging
+    const elapsed = Date.now() - start;
+    const completedJobs = completionStatus.filter(Boolean).length;
+
+    const avgThr = ((completedJobs / elapsed) * 1000).toFixed(2);
+    const instThr =
+      lastElapsed > 0
+        ? (
+          ((completedJobs - lastCompletedJobs) / (elapsed - lastElapsed)) *
+          1000
+        ).toFixed(2)
+        : 0;
+
+    // Print status on the same line (like a progress bar)
+    await Deno.stdout.write(
+      enc(
+        `elapsed: ${(elapsed / 1000).toFixed(2)}s | ` +
+        `jobs executed: ${completedJobs}/${uuids.length} ` +
+        `(thr: inst ${instThr} - avg ${avgThr}) | ` +
+        `remaining: ${uuids.length - completedJobs}                  \r`
+      )
+    );
+
+    // Prepare for next iteration
+    lastElapsed = elapsed;
+    lastCompletedJobs = completedJobs;
+
+    if (completionStatus.every(Boolean)) {
+      break;
+    }
+
+    // Sleep a bit to avoid hammering the server (adjust as needed)
+    await sleep(0.2);
+  }
+
+  const total_duration_sec = (Date.now() - start) / 1000;
+  console.log(`\njobs: ${uuids.length}`);
+  console.log(`duration: ${total_duration_sec.toFixed(2)}s`);
+  console.log(
+    `avg. throughput (jobs/time): ${(uuids.length / total_duration_sec).toFixed(2)}`
+  );
 
   console.log(`\njobs: ${jobsSent}`);
   console.log(`duration: ${total_duration_sec}s`);
   console.log(`avg. throughput (jobs/time): ${jobsSent / total_duration_sec}`);
 
-  console.log("completed jobs", completedJobs);
+  console.log("completed jobs", lastCompletedJobs);
   console.log("queue length:", await getQueueCount());
 
   if (
@@ -346,7 +361,7 @@ if (import.meta.main) {
     .option(
       "-w --workspace <workspace:string>",
       "The workspace to spawn scripts from.",
-      { default: "admins" }
+      {default: "admins"}
     )
     .option(
       "--kind <kind:string>",
@@ -373,7 +388,7 @@ if (import.meta.main) {
           "--allow-env",
           "--unstable",
         ],
-        provider: new DenoLandProvider({ name: "wmillbench" }),
+        provider: new DenoLandProvider({name: "wmillbench"}),
       })
     )
     .parse();

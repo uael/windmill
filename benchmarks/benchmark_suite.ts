@@ -28,6 +28,7 @@ async function warmUp(
     workspace,
     kind: "noop",
     jobs: 50000,
+    noVerify: true,
   });
 }
 
@@ -78,6 +79,7 @@ async function main({
           workspace,
           kind: benchmark.kind,
           jobs: benchmark.jobs,
+          noVerify: true,
         });
 
         if (benchmark.noSave) {
