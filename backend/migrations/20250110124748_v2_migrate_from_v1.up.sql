@@ -12,8 +12,8 @@ WHERE status IS NULL;
 
 -- Insert missing `v2_job` rows from `v2_job_queue`:
 INSERT INTO v2_job (
-    id, workspace_id, created_at, created_by, created_by_email, permissioned_as,
-    kind, entity_id, entity_path, parent_job,
+    id, workspace_id, created_at, created_by, permissioned_as, permissioned_as_email,
+    kind, runnable_id, runnable_path, parent_job,
     script_lang,
     flow_step_id, flow_root_job,
     schedule_path,
@@ -21,7 +21,7 @@ INSERT INTO v2_job (
     args, pre_run_error,
     raw_code, raw_lock, raw_flow
 ) SELECT
-    id, workspace_id, created_at, __created_by, __email, __permissioned_as,
+    id, workspace_id, created_at, __created_by, __permissioned_as, __email,
     __job_kind, __script_hash, __script_path, __parent_job,
     __language,
     __flow_step_id, __root_job,
@@ -35,15 +35,15 @@ WHERE NOT EXISTS (SELECT 1 FROM v2_job WHERE v2_job.id = v2_job_queue.id);
 
 -- Insert missing `v2_job` rows from `v2_job_completed`:
 INSERT INTO v2_job (
-    id, workspace_id, created_at, created_by, created_by_email, permissioned_as,
-    kind, entity_id, entity_path, parent_job,
+    id, workspace_id, created_at, created_by, permissioned_as, permissioned_as_email,
+    kind, runnable_id, runnable_path, parent_job,
     script_lang,
     schedule_path,
     tag, visible_to_owner, priority,
     args,
     raw_code, raw_lock, raw_flow
 ) SELECT
-    id, workspace_id, __created_at, __created_by, __email, __permissioned_as,
+    id, workspace_id, __created_at, __created_by, __permissioned_as, __email,
     __job_kind, __script_hash, __script_path, __parent_job,
     __language,
     __schedule_path,
@@ -57,11 +57,11 @@ WHERE NOT EXISTS (SELECT 1 FROM v2_job WHERE v2_job.id = v2_job_completed.id);
 UPDATE v2_job SET
     created_at = v2_job_queue.created_at,
     created_by = v2_job_queue.__created_by,
-    created_by_email = v2_job_queue.__email,
     permissioned_as = v2_job_queue.__permissioned_as,
+    permissioned_as_email = v2_job_queue.__email,
     kind = v2_job_queue.__job_kind,
-    entity_id = v2_job_queue.__script_hash,
-    entity_path = v2_job_queue.__script_path,
+    runnable_id = v2_job_queue.__script_hash,
+    runnable_path = v2_job_queue.__script_path,
     parent_job = v2_job_queue.__parent_job,
     script_lang = v2_job_queue.__language,
     flow_step_id = v2_job_queue.__flow_step_id,
@@ -87,11 +87,11 @@ WHERE v2_job.id = v2_job_queue.id AND v2_job.created_by = 'missing';
 UPDATE v2_job SET
     created_at = v2_job_completed.__created_at,
     created_by = v2_job_completed.__created_by,
-    created_by_email = v2_job_completed.__email,
     permissioned_as = v2_job_completed.__permissioned_as,
+    permissioned_as_email = v2_job_completed.__email,
     kind = v2_job_completed.__job_kind,
-    entity_id = v2_job_completed.__script_hash,
-    entity_path = v2_job_completed.__script_path,
+    runnable_id = v2_job_completed.__script_hash,
+    runnable_path = v2_job_completed.__script_path,
     parent_job = v2_job_completed.__parent_job,
     script_lang = v2_job_completed.__language,
     schedule_path = v2_job_completed.__schedule_path,

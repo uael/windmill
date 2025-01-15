@@ -2,11 +2,11 @@
 ALTER TABLE v2_job
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     ADD COLUMN IF NOT EXISTS created_by VARCHAR(255) DEFAULT 'missing' NOT NULL,
-    ADD COLUMN IF NOT EXISTS created_by_email VARCHAR(255) DEFAULT 'missing@email.xyz' NOT NULL,
     ADD COLUMN IF NOT EXISTS permissioned_as VARCHAR(55) DEFAULT 'g/all' NOT NULL,
+    ADD COLUMN IF NOT EXISTS permissioned_as_email VARCHAR(255) DEFAULT 'missing@email.xyz' NOT NULL,
     ADD COLUMN IF NOT EXISTS kind job_kind DEFAULT 'script'::job_kind NOT NULL,
-    ADD COLUMN IF NOT EXISTS entity_id BIGINT,
-    ADD COLUMN IF NOT EXISTS entity_path VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS runnable_id BIGINT,
+    ADD COLUMN IF NOT EXISTS runnable_path VARCHAR(255),
     ADD COLUMN IF NOT EXISTS parent_job UUID,
     ADD COLUMN IF NOT EXISTS script_lang script_lang DEFAULT 'python3'::script_lang,
     ADD COLUMN IF NOT EXISTS flow_step INTEGER,
@@ -27,23 +27,23 @@ CREATE POLICY see_folder_extra_perms_user ON v2_job
     AS PERMISSIVE
     FOR ALL
     TO windmill_user
-    USING ((visible_to_owner IS TRUE) AND (SPLIT_PART((entity_path)::TEXT, '/'::TEXT, 1) = 'f'::TEXT) AND
-           (SPLIT_PART((entity_path)::TEXT, '/'::TEXT, 2) = ANY (
+    USING ((visible_to_owner IS TRUE) AND (SPLIT_PART((runnable_path)::TEXT, '/'::TEXT, 1) = 'f'::TEXT) AND
+           (SPLIT_PART((runnable_path)::TEXT, '/'::TEXT, 2) = ANY (
                REGEXP_SPLIT_TO_ARRAY(CURRENT_SETTING('session.folders_read'::TEXT), ','::TEXT))));
 
 CREATE POLICY see_own_path ON v2_job
     AS PERMISSIVE
     FOR ALL
     TO windmill_user
-    USING ((visible_to_owner IS TRUE) AND (SPLIT_PART((entity_path)::TEXT, '/'::TEXT, 1) = 'u'::TEXT) AND
-           (SPLIT_PART((entity_path)::TEXT, '/'::TEXT, 2) = CURRENT_SETTING('session.user'::TEXT)));
+    USING ((visible_to_owner IS TRUE) AND (SPLIT_PART((runnable_path)::TEXT, '/'::TEXT, 1) = 'u'::TEXT) AND
+           (SPLIT_PART((runnable_path)::TEXT, '/'::TEXT, 2) = CURRENT_SETTING('session.user'::TEXT)));
 
 CREATE POLICY see_member_path ON v2_job
     AS PERMISSIVE
     FOR ALL
     TO windmill_user
-    USING ((visible_to_owner IS TRUE) AND (SPLIT_PART((entity_path)::TEXT, '/'::TEXT, 1) = 'g'::TEXT) AND
-           (SPLIT_PART((entity_path)::TEXT, '/'::TEXT, 2) = ANY
+    USING ((visible_to_owner IS TRUE) AND (SPLIT_PART((runnable_path)::TEXT, '/'::TEXT, 1) = 'g'::TEXT) AND
+           (SPLIT_PART((runnable_path)::TEXT, '/'::TEXT, 2) = ANY
             (REGEXP_SPLIT_TO_ARRAY(CURRENT_SETTING('session.groups'::TEXT), ','::TEXT))));
 
 CREATE POLICY see_own ON v2_job
