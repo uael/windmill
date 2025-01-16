@@ -112,7 +112,7 @@ pub(crate) async fn change_workspace_id(
     .await?;
 
     sqlx::query!(
-        "UPDATE completed_job SET workspace_id = $1 WHERE workspace_id = $2",
+        "UPDATE v2_job_completed SET workspace_id = $1 WHERE workspace_id = $2",
         &rw.new_id,
         &old_id
     )
@@ -237,7 +237,7 @@ pub(crate) async fn change_workspace_id(
     .await?;
 
     sqlx::query!(
-        "UPDATE queue SET workspace_id = $1 WHERE workspace_id = $2",
+        "UPDATE v2_job_queue SET workspace_id = $1 WHERE workspace_id = $2",
         &rw.new_id,
         &old_id
     )
@@ -245,7 +245,7 @@ pub(crate) async fn change_workspace_id(
     .await?;
 
     sqlx::query!(
-        "UPDATE job SET workspace_id = $1 WHERE workspace_id = $2",
+        "UPDATE v2_job SET workspace_id = $1 WHERE workspace_id = $2",
         &rw.new_id,
         &old_id
     )
@@ -398,7 +398,10 @@ pub(crate) async fn delete_workspace(
     sqlx::query!("DELETE FROM dependency_map WHERE workspace_id = $1", &w_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query!("DELETE FROM queue WHERE workspace_id = $1", &w_id)
+    sqlx::query!("DELETE FROM v2_job_queue WHERE workspace_id = $1", &w_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!("DELETE FROM v2_job WHERE workspace_id = $1", &w_id)
         .execute(&mut *tx)
         .await?;
     sqlx::query!("DELETE FROM capture WHERE workspace_id = $1", &w_id)
@@ -436,9 +439,12 @@ pub(crate) async fn delete_workspace(
         .execute(&mut *tx)
         .await?;
 
-    sqlx::query!("DELETE FROM completed_job WHERE workspace_id = $1", &w_id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query!(
+        "DELETE FROM v2_job_completed WHERE workspace_id = $1",
+        &w_id
+    )
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query!("DELETE FROM job_stats WHERE workspace_id = $1", &w_id)
         .execute(&mut *tx)

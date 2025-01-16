@@ -808,7 +808,6 @@ async fn create_script_internal<'c>(
             None,
             None,
             false,
-            false,
             None,
             true,
             tag,
