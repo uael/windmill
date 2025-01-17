@@ -675,23 +675,23 @@ async fn get_job(
 }
 
 macro_rules! get_job_query {
-    ("completed_job_view", $($opts:tt)*) => {
+    ("v2_completed_job", $($opts:tt)*) => {
         get_job_query!(
-            @impl "completed_job_view", ($($opts)*),
+            @impl "v2_completed_job", ($($opts)*),
             "duration_ms, success, result, deleted, is_skipped, result->'wm_labels' as labels, \
             CASE WHEN result is null or pg_column_size(result) < 90000 THEN result ELSE '\"WINDMILL_TOO_BIG\"'::jsonb END as result",
         )
     };
-    ("queue_view", $($opts:tt)*) => {
+    ("v2_queue", $($opts:tt)*) => {
         get_job_query!(
-            @impl "queue_view", ($($opts)*),
+            @impl "v2_queue", ($($opts)*),
             "scheduled_for, running, last_ping, suspend, suspend_until, same_worker, pre_run_error, visible_to_owner, \
             root_job, leaf_jobs, concurrent_limit, concurrency_time_window_s, timeout, flow_step_id, cache_ttl",
         )
     };
     (@impl $table:literal, (with_logs: $with_logs:expr, $($rest:tt)*), $additional_fields:literal, $($args:tt)*) => {
         if $with_logs {
-            get_job_query!(@impl $table, ($($rest)*), $additional_fields, logs = const_format::formatcp!("right({}.logs, 20000)", $table), $($args)*)
+            get_job_query!(@impl $table, ($($rest)*), $additional_fields, logs = "right(job_logs.logs, 20000)", $($args)*)
         } else {
             get_job_query!(@impl $table, ($($rest)*), $additional_fields, logs = "null", $($args)*)
         }
@@ -718,7 +718,7 @@ macro_rules! get_job_query {
             {logs} as logs, {code} as raw_code, canceled, canceled_by, canceled_reason, job_kind, \
             schedule_path, permissioned_as, flow_status, {flow} as raw_flow, is_flow_step, language, \
             {lock} as raw_lock, email, visible_to_owner, mem_peak, tag, priority, {additional_fields} \
-            FROM {table} \
+            FROM {table} LEFT JOIN job_logs ON id = job_id \
             WHERE id = $1 AND {table}.workspace_id = $2 AND ($3::text[] IS NULL OR tag = ANY($3)) LIMIT 1",
             table = $table,
             additional_fields = $additional_fields,
@@ -820,7 +820,7 @@ impl<'a> GetQuery<'a> {
         job_id: Uuid,
         workspace_id: &str,
     ) -> error::Result<Option<JobExtended<QueuedJob>>> {
-        let query = get_job_query!("queue_view",
+        let query = get_job_query!("v2_queue",
             with_logs: self.with_logs,
             with_code: self.with_code,
             with_flow: self.with_flow,
@@ -852,7 +852,7 @@ impl<'a> GetQuery<'a> {
         job_id: Uuid,
         workspace_id: &str,
     ) -> error::Result<Option<JobExtended<CompletedJob>>> {
-        let query = get_job_query!("completed_job_view",
+        let query = get_job_query!("v2_completed_job",
             with_logs: self.with_logs,
             with_code: self.with_code,
             with_flow: self.with_flow,
@@ -2711,7 +2711,7 @@ impl<'a> From<UnifiedJob> for Job {
                     parent_job: uj.parent_job,
                     created_by: uj.created_by,
                     created_at: uj.created_at,
-                    started_at: uj.started_at.unwrap_or(uj.created_at),
+                    started_at: uj.started_at,
                     duration_ms: uj.duration_ms.unwrap(),
                     success: uj.success.unwrap(),
                     script_hash: uj.script_hash,
