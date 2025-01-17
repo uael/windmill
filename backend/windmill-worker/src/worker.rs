@@ -1799,6 +1799,7 @@ async fn queue_init_bash_maybe<'c>(
             None,
             None,
             None,
+            false,
             true,
             None,
             true,

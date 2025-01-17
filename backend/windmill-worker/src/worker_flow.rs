@@ -2574,6 +2574,7 @@ async fn push_next_flow_job(
             Some(flow_job.id),
             root_job,
             None,
+            true,
             continue_on_same_worker,
             err,
             flow_job.visible_to_owner,
