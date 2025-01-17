@@ -48,10 +48,8 @@ FROM v2_job_queue q
      LEFT JOIN v2_job_flow_runtime f USING (id)
 ;
 
-CREATE OR REPLACE FUNCTION v2_queue_instead_of_update()
-    RETURNS TRIGGER AS
-$$
-BEGIN
+-- Dispatch update of `v1` schema to `v2_*` tables.
+CREATE OR REPLACE FUNCTION v2_queue_update(OLD v2_queue, NEW v2_queue) RETURNS VOID AS $$ BEGIN
     -- Unsupported columns:
     IF NEW.workspace_id IS DISTINCT FROM OLD.workspace_id
         OR NEW.parent_job IS DISTINCT FROM OLD.parent_job
@@ -97,12 +95,6 @@ BEGIN
         OR NEW.canceled_reason IS DISTINCT FROM OLD.canceled_reason
         OR NEW.suspend IS DISTINCT FROM OLD.suspend
         OR NEW.suspend_until IS DISTINCT FROM OLD.suspend_until
-        -- v2 -> v1
-        OR NEW.args IS DISTINCT FROM OLD.args
-        OR NEW.last_ping IS DISTINCT FROM OLD.last_ping
-        OR NEW.mem_peak IS DISTINCT FROM OLD.mem_peak
-        OR NEW.flow_status::TEXT IS DISTINCT FROM OLD.flow_status::TEXT
-        OR NEW.leaf_jobs::TEXT IS DISTINCT FROM OLD.leaf_jobs::TEXT
     THEN
         UPDATE v2_job_queue
         SET started_at      = NEW.started_at,
@@ -111,12 +103,7 @@ BEGIN
             canceled_by     = NEW.canceled_by,
             canceled_reason = NEW.canceled_reason,
             suspend         = NEW.suspend,
-            suspend_until   = NEW.suspend_until,
-            __args          = NEW.args,
-            __last_ping     = NEW.last_ping,
-            __mem_peak      = NEW.mem_peak,
-            __flow_status   = NEW.flow_status,
-            __leaf_jobs     = NEW.leaf_jobs
+            suspend_until   = NEW.suspend_until
         WHERE id = OLD.id;
     END IF;
     -- Update the `v2_job_runtime` table
@@ -137,24 +124,44 @@ BEGIN
             leaf_jobs   = NEW.leaf_jobs
         WHERE id = OLD.id;
     END IF;
+END $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION v2_queue_instead_of_update() RETURNS TRIGGER AS $$ BEGIN
+    -- v1 -> v2 sync
+    PERFORM v2_queue_update(OLD, NEW);
     RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION v2_queue_instead_of_update_overlay() RETURNS TRIGGER AS $$ BEGIN
+    -- v1 -> v2 sync
+    PERFORM v2_queue_update(OLD, NEW);
+    -- v2 -> v1 sync
+    IF NEW.args IS DISTINCT FROM OLD.args
+        OR NEW.last_ping IS DISTINCT FROM OLD.last_ping
+        OR NEW.mem_peak IS DISTINCT FROM OLD.mem_peak
+        OR NEW.flow_status::TEXT IS DISTINCT FROM OLD.flow_status::TEXT
+        OR NEW.leaf_jobs::TEXT IS DISTINCT FROM OLD.leaf_jobs::TEXT
+    THEN
+        UPDATE v2_job_queue
+        SET __args          = NEW.args,
+            __last_ping     = NEW.last_ping,
+            __mem_peak      = NEW.mem_peak,
+            __flow_status   = NEW.flow_status,
+            __leaf_jobs     = NEW.leaf_jobs
+        WHERE id = OLD.id;
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER v2_queue_instead_of_update_trigger
 INSTEAD OF UPDATE ON v2_queue
 FOR EACH ROW
-EXECUTE PROCEDURE v2_queue_instead_of_update();
+EXECUTE PROCEDURE v2_queue_instead_of_update_overlay();
 
-CREATE OR REPLACE FUNCTION v2_queue_instead_of_delete()
-    RETURNS TRIGGER AS
-$$
-BEGIN
-    DELETE FROM v2_job_queue
-    WHERE id = OLD.id;
+CREATE OR REPLACE FUNCTION v2_queue_instead_of_delete() RETURNS TRIGGER AS $$ BEGIN
+    DELETE FROM v2_job_queue WHERE id = OLD.id;
     RETURN OLD;
-END;
-$$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER v2_queue_instead_of_delete_trigger
     INSTEAD OF DELETE ON v2_queue

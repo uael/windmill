@@ -37,10 +37,7 @@ FROM v2_job_completed c
      JOIN v2_job j USING (id)
 ;
 
-CREATE OR REPLACE FUNCTION v2_completed_job_instead_of_update()
-    RETURNS TRIGGER AS
-$$
-BEGIN
+CREATE OR REPLACE FUNCTION v2_completed_job_update(OLD v2_completed_job, NEW v2_completed_job) RETURNS VOID AS $$ BEGIN
     -- Unsupported columns:
     IF NEW.workspace_id IS DISTINCT FROM OLD.workspace_id
         OR NEW.parent_job IS DISTINCT FROM OLD.parent_job
@@ -69,32 +66,40 @@ BEGIN
     END IF;
     -- Update the `v2_job_completed` table
     IF NEW.result::TEXT IS DISTINCT FROM OLD.result::TEXT
-        -- v2 -> v1
-        OR NEW.args::TEXT IS DISTINCT FROM OLD.args::TEXT
     THEN
         UPDATE v2_job_completed
-        SET result = NEW.result,
-            __args = NEW.args
+        SET result = NEW.result
+        WHERE id = OLD.id;
+    END IF;
+END $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION v2_completed_job_instead_of_update() RETURNS TRIGGER AS $$ BEGIN
+    -- v1 -> v2 sync
+    PERFORM v2_completed_job_update(OLD, NEW);
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION v2_completed_job_instead_of_update_overlay() RETURNS TRIGGER AS $$ BEGIN
+    -- v1 -> v2 sync
+    PERFORM v2_completed_job_update(OLD, NEW);
+    -- v2 -> v1 sync
+    IF NEW.args::TEXT IS DISTINCT FROM OLD.args::TEXT THEN
+        UPDATE v2_job_completed
+        SET __args = NEW.args
         WHERE id = OLD.id;
     END IF;
     RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER v2_completed_job_instead_of_update_trigger
     INSTEAD OF UPDATE ON v2_completed_job
     FOR EACH ROW
-EXECUTE PROCEDURE v2_completed_job_instead_of_update();
+EXECUTE PROCEDURE v2_completed_job_instead_of_update_overlay();
 
-CREATE OR REPLACE FUNCTION v2_completed_job_instead_of_delete()
-    RETURNS TRIGGER AS
-$$
-BEGIN
-    DELETE FROM v2_job_completed
-    WHERE id = OLD.id;
+CREATE OR REPLACE FUNCTION v2_completed_job_instead_of_delete() RETURNS TRIGGER AS $$ BEGIN
+    DELETE FROM v2_job_completed WHERE id = OLD.id;
     RETURN OLD;
-END;
-$$ LANGUAGE plpgsql;
+END $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER v2_completed_job_instead_of_delete_trigger
     INSTEAD OF DELETE ON v2_completed_job

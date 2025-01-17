@@ -787,7 +787,7 @@ pub async fn delete_expired_items(db: &DB) -> () {
                             }
 
                             if let Err(e) =
-                                sqlx::query!("DELETE FROM job WHERE id = ANY($1)", &deleted_jobs)
+                                sqlx::query!("DELETE FROM v2_job WHERE id = ANY($1)", &deleted_jobs)
                                     .execute(&mut *tx)
                                     .await
                             {
