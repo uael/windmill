@@ -79,14 +79,16 @@ impl BenchmarkIter {
     }
 }
 
-pub async fn benchmark_init(benchmark_jobs: i32, db: &DB) {
+pub async fn benchmark_init(benchmark_jobs: usize, db: &DB) {
+    use std::iter;
+
     use windmill_common::{jobs::JobKind, scripts::ScriptLang};
     use windmill_queue::RawJob;
 
     let benchmark_kind = std::env::var("BENCHMARK_KIND").unwrap_or("noop".to_string());
+    let uuids = Vec::from_iter(iter::repeat_with(|| ulid::Ulid::new().into()).take(benchmark_jobs));
 
-    if benchmark_jobs > 0 {
-        let uuids = vec![ulid::Ulid::new().into(); benchmark_jobs as usize];
+    if !uuids.is_empty() {
         match benchmark_kind.as_str() {
             "dedicated" => {
                 // you need to create the script first, check https://github.com/windmill-labs/windmill/blob/b76a92cfe454c686f005c65f534e29e039f3c706/benchmarks/lib.ts#L47

@@ -13,6 +13,7 @@ use quick_cache::sync::Cache;
 use serde_json::value::RawValue;
 use sqlx::Pool;
 use std::collections::HashMap;
+use std::iter;
 use std::ops::{Deref, DerefMut};
 #[cfg(feature = "prometheus")]
 use std::sync::atomic::Ordering;
@@ -4764,7 +4765,7 @@ async fn add_batch_jobs(
     };
 
     let mut tx = user_db.begin(&authed).await?;
-    let uuids = vec![ulid::Ulid::new().into(); n as usize];
+    let uuids = Vec::from_iter(iter::repeat_with(|| ulid::Ulid::new().into()).take(n as usize));
     let args = uuids
         .iter()
         .map(|uuid| sqlx::types::Json(to_raw_value(&serde_json::json!({ "uuid": uuid }))))
