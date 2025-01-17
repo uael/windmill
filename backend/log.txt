@@ -1,3 +1,0 @@
-We STRONGLY recommend using at most 1 worker per container, use at your own risks
-Connecting to database...
-[2m2025-01-14T07:42:10.721151Z[0m [31mERROR[0m [2mwindmill-worker/src/python_executor.rs[0m[2m:[0m[2m324[0m[2m:[0m uv args: ["pip", "compile", "-q", "--no-header", "requirements.in", "--strip-extras", "-o", "requirements.txt", "--index-strategy", "unsafe-best-match", "--cache-dir", "/tmp/windmill/cache/uv", "--python-preference", "only-system", "--no-python-downloads"]
